@@ -11,22 +11,47 @@ customers, and 50,000 transactions over two years.
 
 ## Architecture
 
+```mermaid
+flowchart LR
+    SRC("CSV Landing Zone\n─────────────\nADF trigger\nin production")
+
+    BRONZE("BRONZE\n─────────────\nRaw Delta\nAudit metadata\nbadRecordsPath")
+
+    SILVER("SILVER\n─────────────\nType-safe\nDeduplicated\nValidated\nQuarantined")
+
+    GOLD("GOLD\n─────────────\nAggregated\nRFM scoring\nStore / product\nperformance")
+
+    WH("WAREHOUSE\n─────────────\nStar schema\nfact_sales\ndim_date/customer\nproduct/store")
+
+    VIEWS("SQL VIEWS\n─────────────\nPower BI\nSynapse\n7 KPI views")
+
+    SRC -->|ingest| BRONZE
+    BRONZE -->|MERGE INTO| SILVER
+    SILVER -->|aggregate| GOLD
+    GOLD -->|model| WH
+    WH -->|serve| VIEWS
 ```
-CSV Landing Zone
-      │  (Azure Data Factory in production)
-      ▼
-┌─────────────┐    ┌─────────────┐    ┌─────────────┐    ┌─────────────┐
-│   BRONZE    │───▶│   SILVER    │───▶│    GOLD     │───▶│  WAREHOUSE  │
-│  Raw Delta  │    │  Cleaned    │    │ Aggregated  │    │ Star Schema │
-│  + audit    │    │  validated  │    │ RFM, KPIs   │    │ fact_sales  │
-│  metadata   │    │  enriched   │    │ store perf  │    │ dim_*       │
-└─────────────┘    └─────────────┘    └─────────────┘    └─────────────┘
-                                                                │
-                                                         ┌──────▼──────┐
-                                                         │  SQL VIEWS  │
-                                                         │  Power BI / │
-                                                         │  Synapse    │
-                                                         └─────────────┘
+
+```mermaid
+flowchart LR
+    subgraph Reliability
+        RT("retry.py\nExp. backoff\n3 attempts\njitter")
+        RL("rate_limiter.py\nToken bucket\nAPI throttling")
+        NT("notifier.py\nSlack webhook\nSMTP email")
+        LG("logger.py\nDelta pipeline_logs\nStructured rows")
+    end
+
+    subgraph Quality
+        VL("validation.py\nNull / dupe / range\nPass/fail scorecard")
+        QT("Quarantine\n_quarantine/\nBad rows saved")
+    end
+
+    RT --> PIPE(Pipeline stages)
+    RL --> PIPE
+    PIPE --> LG
+    PIPE --> VL
+    VL --> QT
+    LG --> NT
 ```
 
 See [`architecture/architecture.md`](architecture/architecture.md) for the full
@@ -143,6 +168,74 @@ If no secrets are configured, the pipeline runs normally — notifications are s
 
 **Fact table:** `fact_sales` — 50,000 rows, grain: one transaction  
 **Dimension tables:** `dim_date`, `dim_customer` (5,000), `dim_product` (25), `dim_store` (20)
+
+```mermaid
+erDiagram
+    fact_sales {
+        string  transaction_id PK
+        int     date_key       FK
+        bigint  customer_key   FK
+        bigint  product_key    FK
+        bigint  store_key      FK
+        int     quantity
+        double  unit_price
+        double  discount
+        double  total_amount
+        double  net_revenue
+        string  status
+        int     is_returned
+    }
+
+    dim_date {
+        int    date_key    PK
+        date   full_date
+        int    year
+        int    quarter
+        int    month
+        string month_name
+        int    week_of_year
+        int    day_of_week
+        string day_name
+        int    is_weekend
+    }
+
+    dim_customer {
+        bigint customer_key       PK
+        string customer_id
+        string customer_name
+        string email
+        string city
+        string segment
+        string customer_tier
+        double lifetime_value
+        int    purchase_frequency
+    }
+
+    dim_product {
+        bigint product_key   PK
+        string product_id
+        string product_name
+        string category
+        string subcategory
+        double unit_price
+        double return_rate
+        int    category_rank
+    }
+
+    dim_store {
+        bigint store_key  PK
+        string store_id
+        string store_name
+        string city
+        string region
+        string country
+    }
+
+    fact_sales }o--|| dim_date     : "date_key"
+    fact_sales }o--|| dim_customer : "customer_key"
+    fact_sales }o--|| dim_product  : "product_key"
+    fact_sales }o--|| dim_store    : "store_key"
+```
 
 **Source tables (synthetic):**
 - `sales_transactions.csv` — 50,000 rows, 2023–2024
