@@ -37,6 +37,7 @@
 
 # COMMAND ----------
 
+import re as _re
 import time
 from pyspark.sql import functions as F
 from pyspark.sql.types import StructType
@@ -48,6 +49,10 @@ LANDING_PATH = "dbfs:/FileStore/retail_platform/landing"
 BRONZE_PATH  = "dbfs:/retail_platform/bronze"
 DATABASE     = "retail_platform"
 BATCH_ID     = dbutils.widgets.get("batch_id") if "batch_id" in [w.name for w in dbutils.widgets.getAll()] else "manual_run"
+
+# Validate widget input before any SQL or log use
+if not _re.fullmatch(r'[a-zA-Z0-9_-]{1,64}', BATCH_ID):
+    raise ValueError(f"Invalid batch_id: '{BATCH_ID}'. Must match [a-zA-Z0-9_-]{{1,64}}")
 
 spark.sql(f"CREATE DATABASE IF NOT EXISTS {DATABASE} LOCATION 'dbfs:/retail_platform/database'")
 
@@ -148,7 +153,7 @@ def ingest_to_bronze(table_name: str, schema: StructType) -> None:
         max_attempts   = 3,
         base_delay     = 5.0,
         backoff_factor = 2.0,
-        exceptions     = (IOError, RuntimeError, Exception),
+        exceptions     = (IOError, RuntimeError),
         on_retry       = lambda attempt, exc: logger.warn(
             f"Delta write retry {attempt} for {table_name}: {exc}"
         ),
@@ -205,11 +210,12 @@ for tbl, schema in SCHEMAS.items():
     try:
         ingest_to_bronze(tbl, schema)
     except Exception as e:
-        logger.error(f"Ingestion FAILED for {tbl}: {e}")
+        safe_err = f"{type(e).__name__}: {str(e)[:200]}"
+        logger.error(f"Ingestion FAILED for {tbl}: {safe_err}")
         notifier.send_pipeline_alert(
             stage   = "bronze_ingestion",
             level   = "ERROR",
-            message = f"Table '{tbl}' failed after all retries: {e}",
+            message = f"Table '{tbl}' failed after all retries: {safe_err}",
             run_id  = BATCH_ID,
         )
         failed_tables.append(tbl)

@@ -24,6 +24,7 @@
 
 # COMMAND ----------
 
+import re as _re
 import time
 from pyspark.sql import functions as F
 from pyspark.sql.types import DateType, DoubleType, IntegerType
@@ -32,6 +33,9 @@ DATABASE    = "retail_platform"
 BRONZE_PATH = "dbfs:/retail_platform/bronze"
 SILVER_PATH = "dbfs:/retail_platform/silver"
 BATCH_ID    = dbutils.widgets.get("batch_id") if "batch_id" in [w.name for w in dbutils.widgets.getAll()] else "manual_run"
+
+if not _re.fullmatch(r'[a-zA-Z0-9_-]{1,64}', BATCH_ID):
+    raise ValueError(f"Invalid batch_id: '{BATCH_ID}'. Must match [a-zA-Z0-9_-]{{1,64}}")
 
 spark.sql(f"USE {DATABASE}")
 
@@ -91,9 +95,10 @@ def build_silver_transactions() -> None:
     bad = df.subtract(good)
     rows_rejected = bad.count()
 
-    # Save quarantined rows for investigation
+    # Save quarantined rows — strip audit metadata, keep only business columns for debugging
     if rows_rejected > 0:
-        bad.write.format("delta").mode("append").save(
+        quarantine_cols = [c for c in bad.columns if not c.startswith("_")]
+        bad.select(quarantine_cols).write.format("delta").mode("append").save(
             f"{SILVER_PATH}/_quarantine/transactions"
         )
         logger.warn(f"Quarantined {rows_rejected} bad rows")
@@ -191,6 +196,7 @@ def build_silver_dim(
     pk_col:       str,
     rename_map:   dict | None = None,
     fill_map:     dict | None = None,
+    hash_cols:    list[str] | None = None,
 ) -> None:
     """Generic cleaner for small dimension tables (customers, products, stores)."""
     t0     = time.time()
@@ -212,6 +218,12 @@ def build_silver_dim(
     if fill_map:
         for col_name, default in fill_map.items():
             df = df.fillna({col_name: default})
+
+    # SHA-256 hash PII columns so plaintext never lands in Silver
+    if hash_cols:
+        for col_name in hash_cols:
+            if col_name in df.columns:
+                df = df.withColumn(col_name, F.sha2(F.col(col_name), 256))
 
     # Drop rows missing primary key
     before = df.count()
@@ -254,6 +266,7 @@ build_silver_dim(
     silver_table = "silver_customers",
     pk_col       = "customer_id",
     fill_map     = {"segment": "Unknown", "city": "Unknown"},
+    hash_cols    = ["email"],
 )
 
 build_silver_dim(

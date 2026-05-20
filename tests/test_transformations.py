@@ -9,7 +9,10 @@
 
 from pyspark.sql import Row
 from pyspark.sql import functions as F
-from pyspark.sql.types import *
+from pyspark.sql.types import (
+    StructType, StructField,
+    StringType, IntegerType, DoubleType, TimestampType,
+)
 import traceback
 
 PASS = "PASS"

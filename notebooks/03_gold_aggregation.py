@@ -20,12 +20,16 @@
 
 # COMMAND ----------
 
+import re as _re
 import time
 from pyspark.sql import functions as F, Window
 
 DATABASE  = "retail_platform"
 GOLD_PATH = "dbfs:/retail_platform/gold"
 BATCH_ID  = dbutils.widgets.get("batch_id") if "batch_id" in [w.name for w in dbutils.widgets.getAll()] else "manual_run"
+
+if not _re.fullmatch(r'[a-zA-Z0-9_-]{1,64}', BATCH_ID):
+    raise ValueError(f"Invalid batch_id: '{BATCH_ID}'. Must match [a-zA-Z0-9_-]{{1,64}}")
 
 spark.sql(f"USE {DATABASE}")
 

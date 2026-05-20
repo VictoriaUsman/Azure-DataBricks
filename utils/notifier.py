@@ -33,7 +33,9 @@
 # COMMAND ----------
 
 import smtplib
+import ssl
 import json
+import html as _html
 import urllib.request
 import urllib.error
 from dataclasses import dataclass, field
@@ -59,14 +61,14 @@ LEVEL_COLOR = {
 
 @dataclass
 class NotifierConfig:
-    teams_webhook_url: str | None = None   # MS Teams Incoming Webhook
-    slack_webhook_url: str | None = None   # Slack (optional / legacy)
+    teams_webhook_url: str | None = field(default=None, repr=False)  # MS Teams Incoming Webhook
+    slack_webhook_url: str | None = field(default=None, repr=False)  # Slack (optional / legacy)
 
     # SMTP config (works with Office 365, SendGrid, Gmail, etc.)
     smtp_host:        str | None = None
     smtp_port:        int        = 587
-    smtp_user:        str | None = None
-    smtp_password:    str | None = None
+    smtp_user:        str | None = field(default=None, repr=False)
+    smtp_password:    str | None = field(default=None, repr=False)
     email_from:       str | None = None
     email_to:         list[str]  = field(default_factory=list)
 
@@ -102,7 +104,12 @@ class Notifier:
         def _get(key: str) -> str | None:
             try:
                 return dbutils.secrets.get(scope=scope, key=key)
-            except Exception:
+            except Exception as exc:
+                msg = str(exc).lower()
+                if "secret does not exist" in msg or "resource_does_not_exist" in msg:
+                    return None
+                print(f"[Notifier] WARNING: could not fetch secret '{key}' "
+                      f"from scope '{scope}': {type(exc).__name__}")
                 return None
 
         cfg = NotifierConfig(
@@ -209,7 +216,7 @@ class Notifier:
                 headers={"Content-Type": "application/json"},
                 method="POST",
             )
-            with urllib.request.urlopen(req, timeout=10) as resp:
+            with urllib.request.urlopen(req, context=ssl.create_default_context(), timeout=10) as resp:
                 if resp.status != 200:
                     print(f"[Notifier] Teams returned HTTP {resp.status}")
         except urllib.error.URLError as e:
@@ -257,7 +264,7 @@ class Notifier:
                 headers={"Content-Type": "application/json"},
                 method="POST",
             )
-            with urllib.request.urlopen(req, timeout=10) as resp:
+            with urllib.request.urlopen(req, context=ssl.create_default_context(), timeout=10) as resp:
                 if resp.status != 200:
                     print(f"[Notifier] Slack returned HTTP {resp.status}")
         except urllib.error.URLError as e:
@@ -281,14 +288,14 @@ class Notifier:
                 label = key.replace("_", " ").title()
                 metrics_rows += f"<tr><td><b>{label}</b></td><td>{ctx[key]:,}</td></tr>"
 
-        html = f"""
+        html_body = f"""
         <html><body>
-        <h2 style="color:{LEVEL_COLOR[level]}">{level}: {ctx['stage']}</h2>
-        <p><b>Project:</b> {ctx['project']}<br>
-           <b>Run ID:</b> {ctx['run_id']}<br>
-           <b>Environment:</b> {ctx['environment']}<br>
-           <b>Time:</b> {ctx['timestamp']}</p>
-        <p style="font-size:16px">{ctx['message']}</p>
+        <h2 style="color:{LEVEL_COLOR[level]}">{_html.escape(level)}: {_html.escape(ctx['stage'])}</h2>
+        <p><b>Project:</b> {_html.escape(ctx['project'])}<br>
+           <b>Run ID:</b> {_html.escape(ctx['run_id'])}<br>
+           <b>Environment:</b> {_html.escape(ctx['environment'])}<br>
+           <b>Time:</b> {_html.escape(ctx['timestamp'])}</p>
+        <p style="font-size:16px">{_html.escape(ctx['message'])}</p>
         {'<table border="1" cellpadding="4">' + metrics_rows + '</table>' if metrics_rows else ''}
         </body></html>
         """
@@ -297,12 +304,12 @@ class Notifier:
         msg["Subject"] = subject
         msg["From"]    = self.cfg.email_from or self.cfg.smtp_user
         msg["To"]      = ", ".join(self.cfg.email_to)
-        msg.attach(MIMEText(html, "html"))
+        msg.attach(MIMEText(html_body, "html"))
 
         try:
             with smtplib.SMTP(self.cfg.smtp_host, self.cfg.smtp_port, timeout=15) as s:
                 s.ehlo()
-                s.starttls()
+                s.starttls(context=ssl.create_default_context())
                 s.login(self.cfg.smtp_user, self.cfg.smtp_password)
                 s.sendmail(
                     msg["From"],

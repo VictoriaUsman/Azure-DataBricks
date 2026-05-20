@@ -9,8 +9,13 @@
 
 # COMMAND ----------
 
+import re as _re
+
 spark.sql("USE retail_platform")
 BATCH_ID = dbutils.widgets.get("batch_id") if "batch_id" in [w.name for w in dbutils.widgets.getAll()] else "manual_run"
+
+if not _re.fullmatch(r'[a-zA-Z0-9_-]{1,64}', BATCH_ID):
+    raise ValueError(f"Invalid batch_id: '{BATCH_ID}'. Must match [a-zA-Z0-9_-]{{1,64}}")
 
 # COMMAND ----------
 
@@ -190,7 +195,7 @@ elif rejection_stats > 5.0:
         stage   = "pipeline_monitoring",
         level   = "WARN",
         message = (f"High data rejection rate: {rejection_stats:.1f}% of rows rejected. "
-                   f"Check dbfs:/retail_platform/silver/_quarantine/"),
+                   f"Check the silver_quarantine table for details."),
         rows_rejected = int(rejection_stats),
     )
     print(f"\n  WARN sent — rejection rate {rejection_stats:.1f}% exceeds 5% threshold.")

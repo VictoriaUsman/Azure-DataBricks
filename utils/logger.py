@@ -34,7 +34,7 @@ class PipelineLogger:
 
     def __init__(self, stage: str, run_id: str | None = None):
         self.stage  = stage
-        self.run_id = run_id or str(uuid.uuid4())[:8]
+        self.run_id = run_id or str(uuid.uuid4())
         self._spark = SparkSession.getActiveSession()
         self._ensure_table()
 
