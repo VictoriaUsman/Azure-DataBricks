@@ -1,16 +1,24 @@
 # Databricks notebook source
 # MAGIC %md
-# MAGIC # Notifier Utility — Slack + Email Alerts
+# MAGIC # Notifier Utility — MS Teams + Slack + Email Alerts
 # MAGIC
-# MAGIC Sends pipeline alerts to Slack (webhook) and/or email (SMTP).
-# MAGIC Credentials are read from Databricks Secrets so nothing sensitive is
-# MAGIC committed to the repo.
+# MAGIC Sends pipeline alerts to MS Teams (Incoming Webhook), Slack (webhook),
+# MAGIC and/or email (SMTP). Credentials are read from Databricks Secrets so
+# MAGIC nothing sensitive is committed to the repo.
 # MAGIC
 # MAGIC **Setup (one-time):**
 # MAGIC ```bash
 # MAGIC # Create a Databricks secret scope named "retail_platform"
 # MAGIC databricks secrets create-scope retail_platform
+# MAGIC
+# MAGIC # MS Teams — get the Incoming Webhook URL from Teams channel settings:
+# MAGIC #   Channel → ... → Connectors → Incoming Webhook → Configure → Copy URL
+# MAGIC databricks secrets put --scope retail_platform --key teams_webhook_url
+# MAGIC
+# MAGIC # Slack (optional, kept for backwards compatibility)
 # MAGIC databricks secrets put --scope retail_platform --key slack_webhook_url
+# MAGIC
+# MAGIC # Email (optional)
 # MAGIC databricks secrets put --scope retail_platform --key smtp_password
 # MAGIC ```
 # MAGIC
@@ -51,9 +59,10 @@ LEVEL_COLOR = {
 
 @dataclass
 class NotifierConfig:
-    slack_webhook_url: str | None = None
+    teams_webhook_url: str | None = None   # MS Teams Incoming Webhook
+    slack_webhook_url: str | None = None   # Slack (optional / legacy)
 
-    # SMTP config (works with Gmail, SendGrid, Office 365, etc.)
+    # SMTP config (works with Office 365, SendGrid, Gmail, etc.)
     smtp_host:        str | None = None
     smtp_port:        int        = 587
     smtp_user:        str | None = None
@@ -97,6 +106,7 @@ class Notifier:
                 return None
 
         cfg = NotifierConfig(
+            teams_webhook_url = _get("teams_webhook_url"),
             slack_webhook_url = _get("slack_webhook_url"),
             smtp_host         = _get("smtp_host"),
             smtp_port         = int(_get("smtp_port") or 587),
@@ -107,10 +117,10 @@ class Notifier:
             environment       = environment,
         )
 
-        if not cfg.slack_webhook_url and not cfg.smtp_host:
+        if not any([cfg.teams_webhook_url, cfg.slack_webhook_url, cfg.smtp_host]):
             print("[Notifier] WARNING: no notification channels configured. "
-                  "Add 'slack_webhook_url' or SMTP keys to Databricks secret scope "
-                  f"'{scope}'.")
+                  "Add 'teams_webhook_url', 'slack_webhook_url', or SMTP keys "
+                  f"to Databricks secret scope '{scope}'.")
 
         return cls(cfg)
 
@@ -148,8 +158,64 @@ class Notifier:
             "timestamp":     datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC"),
         }
 
+        self._dispatch_teams(context)
         self._dispatch_slack(context)
         self._dispatch_email(context)
+
+    # ── MS Teams ──────────────────────────────────────────────────────────────
+
+    def _dispatch_teams(self, ctx: dict) -> None:
+        """
+        Sends an Adaptive MessageCard to an MS Teams channel via Incoming Webhook.
+        Connector URL configured in Teams: Channel → ... → Connectors →
+        Incoming Webhook → Configure → Copy URL → store in Databricks Secrets.
+        """
+        if not self.cfg.teams_webhook_url:
+            return
+
+        color = LEVEL_COLOR.get(ctx["level"], "#aaaaaa").lstrip("#")
+
+        facts = [
+            {"name": "Stage",       "value": ctx["stage"]},
+            {"name": "Run ID",      "value": ctx["run_id"] or "—"},
+            {"name": "Environment", "value": ctx["environment"]},
+            {"name": "Time",        "value": ctx["timestamp"]},
+        ]
+        if ctx["rows_written"] is not None:
+            facts.append({"name": "Rows Written",  "value": f"{ctx['rows_written']:,}"})
+        if ctx["rows_rejected"] is not None:
+            facts.append({"name": "Rows Rejected", "value": f"{ctx['rows_rejected']:,}"})
+        if ctx["duration_ms"] is not None:
+            facts.append({"name": "Duration",      "value": f"{ctx['duration_ms']:,} ms"})
+
+        payload = {
+            "@type":    "MessageCard",
+            "@context": "https://schema.org/extensions",
+            "themeColor": color,
+            "summary":  f"[{ctx['level']}] {ctx['project']}: {ctx['stage']}",
+            "sections": [{
+                "activityTitle":    f"**[{ctx['level']}] {ctx['project']} — {ctx['stage']}**",
+                "activitySubtitle": ctx["environment"],
+                "facts":            facts,
+                "text":             ctx["message"],
+            }],
+        }
+
+        try:
+            data = json.dumps(payload).encode("utf-8")
+            req  = urllib.request.Request(
+                self.cfg.teams_webhook_url,
+                data=data,
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                if resp.status != 200:
+                    print(f"[Notifier] Teams returned HTTP {resp.status}")
+        except urllib.error.URLError as e:
+            print(f"[Notifier] Teams delivery failed: {e}")
+        except Exception as e:
+            print(f"[Notifier] Unexpected Teams error: {e}")
 
     # ── Slack ─────────────────────────────────────────────────────────────────
 

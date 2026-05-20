@@ -81,20 +81,17 @@ Find your cluster ID: **Compute** → click your cluster → copy the ID from th
 02_silver_transformation     timeout: 40 min   retries: 2 (every 2 min)
     │
     ▼
-03_gold_aggregation          timeout: 40 min   retries: 2 (every 2 min)
-    │
-    ▼
-07_scd2_dim_customer         timeout: 30 min   retries: 2 (every 2 min)
-    │                         SCD Type 2 — close old rows, insert new versions
-    ▼
-04_warehouse_star_schema     timeout: 40 min   retries: 2 (every 2 min)
-    │                         reads dim_customer (already built by 07)
-    ▼
-05_analytics_queries         timeout: 10 min   retries: 1
-    │
+08_dbt_run                   timeout: 60 min   retries: 2 (every 2 min)
+    │   ├─ dbt deps      (install dbt_utils)
+    │   ├─ dbt snapshot  (SCD2 dim_customer)
+    │   ├─ dbt run       (Gold → Warehouse → Analytics)
+    │   └─ dbt test      (schema + data quality)
     ▼
 06_monitoring                timeout:  5 min   retries: 1   run_if: ALL_DONE
 ```
+
+Notebooks 03, 04, 05, 07 are **retained as reference implementations** but
+are no longer wired into the workflow — dbt handles those layers end-to-end.
 
 `06_monitoring` uses `run_if: ALL_DONE` — it runs even if an upstream task failed,  
 so the health check and failure alert always fires regardless of where the pipeline broke.

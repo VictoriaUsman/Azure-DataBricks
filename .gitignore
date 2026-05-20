@@ -37,6 +37,12 @@ desktop.ini
 *.swp
 *.swo
 
+# dbt — never commit real profiles (contains tokens)
+dbt/retail_sales/profiles.yml
+dbt/retail_sales/target/
+dbt/retail_sales/dbt_packages/
+dbt/retail_sales/logs/
+
 # Data files (keep samples in data/ but not large dumps)
 *.csv
 *.parquet

@@ -1,0 +1,55 @@
+version: 2
+
+models:
+  - name: gold_sales_daily
+    description: "Daily revenue by store × product × date. Excludes returns."
+    columns:
+      - name: transaction_date
+        tests: [not_null]
+      - name: store_id
+        tests: [not_null]
+      - name: product_id
+        tests: [not_null]
+      - name: revenue
+        tests: [not_null]
+
+  - name: gold_sales_monthly
+    description: "Monthly revenue by category with MoM growth rate."
+    columns:
+      - name: year_month
+        tests: [not_null]
+      - name: category
+        tests: [not_null]
+      - name: revenue
+        tests: [not_null]
+
+  - name: gold_customer_summary
+    description: "Per-customer RFM scores, tier labels, and lifetime metrics."
+    columns:
+      - name: customer_id
+        tests: [not_null, unique]
+      - name: customer_tier
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['Champions', 'Loyal', 'Potential', 'At Risk']
+      - name: rfm_score
+        tests: [not_null]
+
+  - name: gold_product_performance
+    description: "All-time product metrics: revenue, return rate, category rank."
+    columns:
+      - name: product_id
+        tests: [not_null, unique]
+      - name: return_rate
+        tests: [not_null]
+
+  - name: gold_store_performance
+    description: "Monthly store performance with regional rank."
+    columns:
+      - name: store_id
+        tests: [not_null]
+      - name: year_month
+        tests: [not_null]
+      - name: revenue
+        tests: [not_null]

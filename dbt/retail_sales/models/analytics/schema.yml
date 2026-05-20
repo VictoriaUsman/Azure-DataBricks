@@ -1,0 +1,32 @@
+version: 2
+
+models:
+  - name: vw_exec_summary
+    description: "Year-level KPIs: revenue, transactions, AOV, return rate."
+
+  - name: vw_revenue_trend
+    description: "Monthly revenue with MoM growth rate."
+
+  - name: vw_customer_segments
+    description: "Revenue and customer count by current tier and segment."
+
+  - name: vw_top_products
+    description: "Top 10 products by revenue with discount and return metrics."
+
+  - name: vw_store_ranking
+    description: "All-time store performance with regional rank."
+
+  - name: vw_category_heatmap
+    description: "Revenue by category × month for heatmap visualisation."
+
+  - name: vw_customer_acquisition
+    description: "New vs returning customers per month."
+
+  - name: vw_customer_history
+    description: "Full SCD2 audit trail — every version of every customer record."
+
+  - name: vw_revenue_by_historical_tier
+    description: >
+      Revenue attributed to the customer tier active at transaction time,
+      not the customer's current tier. Uses the SCD2-resolved customer_key
+      from fact_sales.

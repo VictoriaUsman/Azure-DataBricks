@@ -1,0 +1,55 @@
+version: 2
+
+models:
+  - name: dim_date
+    description: "Full date dimension for 2023-2024. Generated — no source dependency."
+    columns:
+      - name: date_key
+        tests: [not_null, unique]
+      - name: full_date
+        tests: [not_null, unique]
+
+  - name: dim_product
+    description: "Product dimension enriched with Gold performance metrics."
+    columns:
+      - name: product_key
+        tests: [not_null, unique]
+      - name: product_id
+        tests: [not_null, unique]
+
+  - name: dim_store
+    description: "Store dimension."
+    columns:
+      - name: store_key
+        tests: [not_null, unique]
+      - name: store_id
+        tests: [not_null, unique]
+
+  - name: fact_sales
+    description: >
+      Central fact table. Grain: one row per transaction.
+      customer_key resolves the SCD2 dim_customer version active at transaction_date.
+      Returns are stored with negative net_revenue so SUM aggregates net correctly.
+    columns:
+      - name: transaction_id
+        tests: [not_null, unique]
+      - name: date_key
+        tests: [not_null]
+      - name: net_revenue
+        tests: [not_null]
+
+snapshots:
+  - name: dim_customer
+    description: >
+      SCD Type 2 customer dimension. Tracks history when segment, city, or
+      customer_tier changes. dbt_valid_from / dbt_valid_to define the version
+      window; dbt_scd_id is the surrogate key used in fact_sales.
+    columns:
+      - name: customer_id
+        tests: [not_null]
+      - name: dbt_scd_id
+        tests: [not_null, unique]
+      - name: customer_tier
+        tests:
+          - accepted_values:
+              values: ['Champions', 'Loyal', 'Potential', 'At Risk', 'Unknown']

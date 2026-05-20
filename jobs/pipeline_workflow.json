@@ -95,90 +95,33 @@
     },
 
     {
-      "task_key": "03_gold_aggregation",
-      "description": "Build Gold aggregates: daily sales, RFM, product and store performance",
+      "task_key": "08_dbt_run",
+      "description": "dbt: snapshot dim_customer (SCD2), build Gold/Warehouse/Analytics models, run tests",
       "depends_on": [
         { "task_key": "02_silver_transformation" }
       ],
       "job_cluster_key": "pipeline_cluster",
       "notebook_task": {
-        "notebook_path": "/retail-sales-platform/notebooks/03_gold_aggregation",
+        "notebook_path": "/retail-sales-platform/notebooks/08_dbt_run",
         "source": "WORKSPACE",
         "base_parameters": {
           "batch_id": "{{job.start_time.iso_date}}"
         }
       },
-      "timeout_seconds": 2400,
+      "timeout_seconds": 3600,
       "max_retries": 2,
       "min_retry_interval_millis": 120000,
-      "retry_on_timeout": true
-    },
-
-    {
-      "task_key": "07_scd2_dim_customer",
-      "description": "Apply SCD Type 2 to dim_customer — close old rows, insert new active rows",
-      "depends_on": [
-        { "task_key": "03_gold_aggregation" }
-      ],
-      "job_cluster_key": "pipeline_cluster",
-      "notebook_task": {
-        "notebook_path": "/retail-sales-platform/notebooks/07_scd2_dim_customer",
-        "source": "WORKSPACE",
-        "base_parameters": {
-          "batch_id": "{{job.start_time.iso_date}}"
-        }
-      },
-      "timeout_seconds": 1800,
-      "max_retries": 2,
-      "min_retry_interval_millis": 120000,
-      "retry_on_timeout": true
-    },
-
-    {
-      "task_key": "04_warehouse_star_schema",
-      "description": "Build star schema: fact_sales and dim_date/product/store (dim_customer owned by 07)",
-      "depends_on": [
-        { "task_key": "07_scd2_dim_customer" }
-      ],
-      "job_cluster_key": "pipeline_cluster",
-      "notebook_task": {
-        "notebook_path": "/retail-sales-platform/notebooks/04_warehouse_star_schema",
-        "source": "WORKSPACE",
-        "base_parameters": {
-          "batch_id": "{{job.start_time.iso_date}}"
-        }
-      },
-      "timeout_seconds": 2400,
-      "max_retries": 2,
-      "min_retry_interval_millis": 120000,
-      "retry_on_timeout": true
-    },
-
-    {
-      "task_key": "05_analytics_queries",
-      "description": "Refresh SQL views for Power BI consumption",
-      "depends_on": [
-        { "task_key": "04_warehouse_star_schema" }
-      ],
-      "job_cluster_key": "pipeline_cluster",
-      "notebook_task": {
-        "notebook_path": "/retail-sales-platform/notebooks/05_analytics_queries",
-        "source": "WORKSPACE",
-        "base_parameters": {
-          "batch_id": "{{job.start_time.iso_date}}"
-        }
-      },
-      "timeout_seconds": 600,
-      "max_retries": 1,
-      "min_retry_interval_millis": 60000,
-      "retry_on_timeout": false
+      "retry_on_timeout": true,
+      "libraries": [
+        { "pypi": { "package": "dbt-databricks>=1.7.0,<2.0.0" } }
+      ]
     },
 
     {
       "task_key": "06_monitoring",
       "description": "Run health checks and dispatch Slack/email alerts",
       "depends_on": [
-        { "task_key": "05_analytics_queries" }
+        { "task_key": "08_dbt_run" }
       ],
       "job_cluster_key": "pipeline_cluster",
       "notebook_task": {

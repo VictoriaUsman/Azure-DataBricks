@@ -1,0 +1,34 @@
+name: retail_sales_platform
+version: "1.0.0"
+config-version: 2
+
+profile: retail_sales_platform
+
+model-paths:    ["models"]
+snapshot-paths: ["snapshots"]
+test-paths:     ["tests"]
+macro-paths:    ["macros"]
+target-path:    "target"
+clean-targets:  ["target", "dbt_packages"]
+
+models:
+  retail_sales_platform:
+    gold:
+      +materialized: table
+      +schema: retail_platform
+    warehouse:
+      +materialized: table
+      +schema: retail_platform
+    analytics:
+      +materialized: view
+      +schema: retail_platform
+
+snapshots:
+  retail_sales_platform:
+    +target_schema: retail_platform
+    +unique_key: customer_id
+    +strategy: check
+    +check_cols:
+      - segment
+      - city
+      - customer_tier
