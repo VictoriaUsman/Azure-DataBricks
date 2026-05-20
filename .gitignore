@@ -1,0 +1,50 @@
+# Interview / generated documents
+interview_prep.docx
+generate_interview_doc.py
+~$*.docx
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+env/
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Jupyter / Databricks local artifacts
+.ipynb_checkpoints/
+*.ipynb
+
+# Environment & secrets
+.env
+.env.*
+secrets.json
+*.key
+*.pem
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Data files (keep samples in data/ but not large dumps)
+*.csv
+*.parquet
+*.json.gz
+!data/*.csv
+!data/sample_*.csv
+
+# Delta / Spark local artifacts
+derby.log
+metastore_db/
+spark-warehouse/

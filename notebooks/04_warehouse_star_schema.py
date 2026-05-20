@@ -34,9 +34,10 @@ from pyspark.sql.types import IntegerType
 DATABASE  = "retail_platform"
 GOLD_PATH = "dbfs:/retail_platform/gold"
 DW_PATH   = "dbfs:/retail_platform/gold/warehouse"
+BATCH_ID  = dbutils.widgets.get("batch_id") if "batch_id" in [w.name for w in dbutils.widgets.getAll()] else "manual_run"
 
 spark.sql(f"USE {DATABASE}")
-logger = PipelineLogger("warehouse_star_schema")
+logger = PipelineLogger("warehouse_star_schema", run_id=BATCH_ID)
 
 # COMMAND ----------
 
@@ -93,31 +94,10 @@ def build_dim_date():
 
 # MAGIC %md
 # MAGIC ## Dimension: Customer
-
-# COMMAND ----------
-
-def build_dim_customer():
-    t0   = time.time()
-    base = spark.table("silver_customers")
-    rfm  = spark.table("gold_customer_summary").select(
-        "customer_id", "customer_tier", "lifetime_value", "purchase_frequency", "recency_days"
-    )
-
-    df = (
-        base
-        .join(rfm, "customer_id", "left")
-        .select(
-            F.monotonically_increasing_id().alias("customer_key"),  # surrogate key
-            "customer_id", "customer_name", "email",
-            "city", "segment",
-            F.coalesce("customer_tier", F.lit("Unknown")).alias("customer_tier"),
-            F.coalesce("lifetime_value", F.lit(0.0)).alias("lifetime_value"),
-            F.coalesce("purchase_frequency", F.lit(0)).alias("purchase_frequency"),
-        )
-    )
-
-    save_dim(df, "dim_customer")
-    logger.info("dim_customer complete", duration_ms=int((time.time()-t0)*1000))
+# MAGIC
+# MAGIC `dim_customer` is maintained by **notebook 07_scd2_dim_customer** which runs
+# MAGIC before this notebook in the workflow. This notebook only reads it to resolve
+# MAGIC surrogate keys for `fact_sales`; it does **not** overwrite it.
 
 # COMMAND ----------
 
@@ -178,20 +158,39 @@ def build_fact_sales():
     """
     Grain: one row per completed/pending transaction.
     Returns are stored with negative amounts so aggregates net correctly.
-    All foreign keys use the natural business keys (not surrogates) for
-    simplicity on Community Edition — in production join to dim tables for
-    surrogate keys.
+
+    dim_customer is SCD Type 2 — we resolve the surrogate key that was valid
+    on the transaction_date so historical facts reflect the attributes that
+    existed at the time of the sale, not the customer's current state.
     """
     t0 = time.time()
 
-    # Bring in dim keys
-    dim_customer = spark.table("dim_customer").select("customer_key", "customer_id")
+    # SCD2-aware join: match on customer_id AND the version whose date range
+    # covers the transaction date.  COALESCE(effective_end_date, '9999-12-31')
+    # makes the open-ended current row match any date after it became active.
+    dim_customer_all = spark.table("dim_customer").select(
+        "customer_key", "customer_id", "effective_start_date", "effective_end_date"
+    )
     dim_product  = spark.table("dim_product") .select("product_key",  "product_id")
     dim_store    = spark.table("dim_store")   .select("store_key",    "store_id")
 
+    txn = spark.table("silver_transactions")
+
+    dim_customer_resolved = (
+        txn.select("transaction_id", "customer_id", "transaction_date")
+        .join(dim_customer_all, "customer_id", "left")
+        .filter(
+            (F.col("transaction_date") >= F.col("effective_start_date")) &
+            (F.col("transaction_date") <= F.coalesce(
+                F.col("effective_end_date"), F.lit("9999-12-31").cast("date")
+            ))
+        )
+        .select("transaction_id", "customer_key")
+    )
+
     fact = (
-        spark.table("silver_transactions")
-        .join(dim_customer, "customer_id", "left")
+        txn
+        .join(dim_customer_resolved, "transaction_id", "left")
         .join(dim_product,  "product_id",  "left")
         .join(dim_store,    "store_id",    "left")
         .withColumn(
@@ -237,7 +236,6 @@ print("STAR SCHEMA BUILD — START")
 print("=" * 60)
 
 build_dim_date()
-build_dim_customer()
 build_dim_product()
 build_dim_store()
 build_fact_sales()

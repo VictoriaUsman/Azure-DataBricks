@@ -1,0 +1,227 @@
+{
+  "name": "retail_sales_platform_pipeline",
+
+  "schedule": {
+    "quartz_cron_expression": "0 0 8 ? * WED,FRI *",
+    "timezone_id": "America/New_York",
+    "pause_status": "UNPAUSED"
+  },
+
+  "max_concurrent_runs": 1,
+
+  "job_clusters": [
+    {
+      "job_cluster_key": "pipeline_cluster",
+      "new_cluster": {
+        "spark_version": "13.3.x-scala2.12",
+        "spark_conf": {
+          "spark.sql.shuffle.partitions": "8",
+          "spark.databricks.delta.optimizeWrite.enabled": "true",
+          "spark.databricks.delta.autoCompact.enabled": "true",
+          "spark.sql.adaptive.enabled": "true",
+          "spark.sql.adaptive.coalescePartitions.enabled": "true"
+        },
+        "node_type_id": "Standard_DS3_v2",
+        "num_workers": 2,
+        "autoscale": {
+          "min_workers": 1,
+          "max_workers": 4
+        },
+        "spark_env_vars": {
+          "PYSPARK_PYTHON": "/databricks/python3/bin/python3"
+        },
+        "runtime_engine": "PHOTON"
+      }
+    }
+  ],
+
+  "tasks": [
+
+    {
+      "task_key": "00_setup",
+      "description": "Initialise database, DBFS paths and Spark config",
+      "job_cluster_key": "pipeline_cluster",
+      "notebook_task": {
+        "notebook_path": "/retail-sales-platform/notebooks/00_setup",
+        "source": "WORKSPACE",
+        "base_parameters": {
+          "batch_id": "{{job.start_time.iso_date}}"
+        }
+      },
+      "timeout_seconds": 300,
+      "max_retries": 2,
+      "min_retry_interval_millis": 60000,
+      "retry_on_timeout": true
+    },
+
+    {
+      "task_key": "01_bronze_ingestion",
+      "description": "Ingest raw CSVs from landing zone into Bronze Delta tables",
+      "depends_on": [
+        { "task_key": "00_setup" }
+      ],
+      "job_cluster_key": "pipeline_cluster",
+      "notebook_task": {
+        "notebook_path": "/retail-sales-platform/notebooks/01_bronze_ingestion",
+        "source": "WORKSPACE",
+        "base_parameters": {
+          "batch_id": "{{job.start_time.iso_date}}"
+        }
+      },
+      "timeout_seconds": 1800,
+      "max_retries": 3,
+      "min_retry_interval_millis": 300000,
+      "retry_on_timeout": true
+    },
+
+    {
+      "task_key": "02_silver_transformation",
+      "description": "Clean, validate, deduplicate and MERGE INTO Silver tables",
+      "depends_on": [
+        { "task_key": "01_bronze_ingestion" }
+      ],
+      "job_cluster_key": "pipeline_cluster",
+      "notebook_task": {
+        "notebook_path": "/retail-sales-platform/notebooks/02_silver_transformation",
+        "source": "WORKSPACE",
+        "base_parameters": {
+          "batch_id": "{{job.start_time.iso_date}}"
+        }
+      },
+      "timeout_seconds": 2400,
+      "max_retries": 2,
+      "min_retry_interval_millis": 120000,
+      "retry_on_timeout": true
+    },
+
+    {
+      "task_key": "03_gold_aggregation",
+      "description": "Build Gold aggregates: daily sales, RFM, product and store performance",
+      "depends_on": [
+        { "task_key": "02_silver_transformation" }
+      ],
+      "job_cluster_key": "pipeline_cluster",
+      "notebook_task": {
+        "notebook_path": "/retail-sales-platform/notebooks/03_gold_aggregation",
+        "source": "WORKSPACE",
+        "base_parameters": {
+          "batch_id": "{{job.start_time.iso_date}}"
+        }
+      },
+      "timeout_seconds": 2400,
+      "max_retries": 2,
+      "min_retry_interval_millis": 120000,
+      "retry_on_timeout": true
+    },
+
+    {
+      "task_key": "07_scd2_dim_customer",
+      "description": "Apply SCD Type 2 to dim_customer — close old rows, insert new active rows",
+      "depends_on": [
+        { "task_key": "03_gold_aggregation" }
+      ],
+      "job_cluster_key": "pipeline_cluster",
+      "notebook_task": {
+        "notebook_path": "/retail-sales-platform/notebooks/07_scd2_dim_customer",
+        "source": "WORKSPACE",
+        "base_parameters": {
+          "batch_id": "{{job.start_time.iso_date}}"
+        }
+      },
+      "timeout_seconds": 1800,
+      "max_retries": 2,
+      "min_retry_interval_millis": 120000,
+      "retry_on_timeout": true
+    },
+
+    {
+      "task_key": "04_warehouse_star_schema",
+      "description": "Build star schema: fact_sales and dim_date/product/store (dim_customer owned by 07)",
+      "depends_on": [
+        { "task_key": "07_scd2_dim_customer" }
+      ],
+      "job_cluster_key": "pipeline_cluster",
+      "notebook_task": {
+        "notebook_path": "/retail-sales-platform/notebooks/04_warehouse_star_schema",
+        "source": "WORKSPACE",
+        "base_parameters": {
+          "batch_id": "{{job.start_time.iso_date}}"
+        }
+      },
+      "timeout_seconds": 2400,
+      "max_retries": 2,
+      "min_retry_interval_millis": 120000,
+      "retry_on_timeout": true
+    },
+
+    {
+      "task_key": "05_analytics_queries",
+      "description": "Refresh SQL views for Power BI consumption",
+      "depends_on": [
+        { "task_key": "04_warehouse_star_schema" }
+      ],
+      "job_cluster_key": "pipeline_cluster",
+      "notebook_task": {
+        "notebook_path": "/retail-sales-platform/notebooks/05_analytics_queries",
+        "source": "WORKSPACE",
+        "base_parameters": {
+          "batch_id": "{{job.start_time.iso_date}}"
+        }
+      },
+      "timeout_seconds": 600,
+      "max_retries": 1,
+      "min_retry_interval_millis": 60000,
+      "retry_on_timeout": false
+    },
+
+    {
+      "task_key": "06_monitoring",
+      "description": "Run health checks and dispatch Slack/email alerts",
+      "depends_on": [
+        { "task_key": "05_analytics_queries" }
+      ],
+      "job_cluster_key": "pipeline_cluster",
+      "notebook_task": {
+        "notebook_path": "/retail-sales-platform/notebooks/06_monitoring",
+        "source": "WORKSPACE",
+        "base_parameters": {
+          "batch_id": "{{job.start_time.iso_date}}"
+        }
+      },
+      "timeout_seconds": 300,
+      "max_retries": 1,
+      "min_retry_interval_millis": 60000,
+      "retry_on_timeout": false,
+      "run_if": "ALL_DONE"
+    }
+
+  ],
+
+  "email_notifications": {
+    "on_start":   [],
+    "on_success": ["ian.tristan@romtech.com"],
+    "on_failure": ["ian.tristan@romtech.com"],
+    "no_alert_for_skipped_runs": true
+  },
+
+  "webhook_notifications": {
+    "on_failure": [
+      {
+        "id": "REPLACE_WITH_SLACK_WEBHOOK_ID"
+      }
+    ]
+  },
+
+  "run_as": {
+    "user_name": "ian.tristan@romtech.com"
+  },
+
+  "tags": {
+    "project":     "retail-sales-platform",
+    "environment": "production",
+    "team":        "data-engineering",
+    "schedule":    "wed-fri-8am-est"
+  },
+
+  "format": "MULTI_TASK"
+}

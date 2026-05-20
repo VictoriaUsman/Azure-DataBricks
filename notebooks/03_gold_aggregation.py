@@ -25,10 +25,11 @@ from pyspark.sql import functions as F, Window
 
 DATABASE  = "retail_platform"
 GOLD_PATH = "dbfs:/retail_platform/gold"
+BATCH_ID  = dbutils.widgets.get("batch_id") if "batch_id" in [w.name for w in dbutils.widgets.getAll()] else "manual_run"
 
 spark.sql(f"USE {DATABASE}")
 
-logger = PipelineLogger("gold_aggregation")
+logger = PipelineLogger("gold_aggregation", run_id=BATCH_ID)
 
 # COMMAND ----------
 

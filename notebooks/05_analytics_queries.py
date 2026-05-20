@@ -12,6 +12,11 @@
 # MAGIC 4. Product Performance (top sellers, return rates)
 # MAGIC 5. Regional Store Rankings
 # MAGIC 6. Cohort Retention Proxy
+# MAGIC 7. Customer Version History (SCD2 audit trail)
+# MAGIC
+# MAGIC **SCD2 note:** All views that join `dim_customer` filter on `is_current = true`
+# MAGIC to use the customer's current attributes. Use `vw_customer_history` to query
+# MAGIC attributes as they were at the time of a specific transaction.
 
 # COMMAND ----------
 
@@ -91,6 +96,7 @@ spark.sql("USE retail_platform")
 # MAGIC           / SUM(SUM(f.net_revenue)) OVER () * 100, 2) AS revenue_share_pct
 # MAGIC FROM  fact_sales      f
 # MAGIC JOIN  dim_customer    dc ON f.customer_key = dc.customer_key
+# MAGIC                        AND dc.is_current = true
 # MAGIC GROUP BY dc.customer_tier, dc.segment
 # MAGIC ORDER BY total_revenue DESC;
 # MAGIC
@@ -195,6 +201,59 @@ spark.sql("USE retail_platform")
 # MAGIC ORDER BY f.year_month;
 # MAGIC
 # MAGIC SELECT * FROM vw_customer_acquisition
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## KPI 8 — Customer Version History (SCD2 Audit)
+
+# COMMAND ----------
+
+# MAGIC %sql
+# MAGIC -- Shows every historical version of a customer's tracked attributes.
+# MAGIC -- Useful for auditing attribute changes and for historised reporting.
+# MAGIC CREATE OR REPLACE VIEW vw_customer_history AS
+# MAGIC SELECT
+# MAGIC     customer_id,
+# MAGIC     customer_name,
+# MAGIC     segment,
+# MAGIC     city,
+# MAGIC     customer_tier,
+# MAGIC     effective_start_date,
+# MAGIC     effective_end_date,
+# MAGIC     is_current,
+# MAGIC     DATEDIFF(
+# MAGIC         COALESCE(effective_end_date, CURRENT_DATE()),
+# MAGIC         effective_start_date
+# MAGIC     )                          AS days_in_version,
+# MAGIC     COUNT(*) OVER (PARTITION BY customer_id) AS total_versions
+# MAGIC FROM  dim_customer
+# MAGIC ORDER BY customer_id, effective_start_date;
+# MAGIC
+# MAGIC -- Sample: customers who changed tier at least once
+# MAGIC SELECT * FROM vw_customer_history WHERE total_versions > 1 LIMIT 20
+
+# COMMAND ----------
+
+# MAGIC %sql
+# MAGIC -- Historised revenue: revenue attributed to the customer attributes
+# MAGIC -- that were TRUE at the time of each sale (not current attributes).
+# MAGIC -- This is the correct way to analyse "revenue by tier" over time.
+# MAGIC CREATE OR REPLACE VIEW vw_revenue_by_historical_tier AS
+# MAGIC SELECT
+# MAGIC     dd.year,
+# MAGIC     dd.year_month,
+# MAGIC     dc.customer_tier,
+# MAGIC     dc.segment,
+# MAGIC     COUNT(DISTINCT f.transaction_id)   AS transactions,
+# MAGIC     ROUND(SUM(f.net_revenue), 2)       AS revenue
+# MAGIC FROM  fact_sales   f
+# MAGIC JOIN  dim_customer dc ON f.customer_key = dc.customer_key
+# MAGIC JOIN  dim_date     dd ON f.date_key     = dd.date_key
+# MAGIC GROUP BY dd.year, dd.year_month, dc.customer_tier, dc.segment
+# MAGIC ORDER BY dd.year_month, dc.customer_tier;
+# MAGIC
+# MAGIC SELECT * FROM vw_revenue_by_historical_tier ORDER BY year_month
 
 # COMMAND ----------
 

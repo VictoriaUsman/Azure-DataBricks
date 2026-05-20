@@ -10,6 +10,7 @@
 # COMMAND ----------
 
 spark.sql("USE retail_platform")
+BATCH_ID = dbutils.widgets.get("batch_id") if "batch_id" in [w.name for w in dbutils.widgets.getAll()] else "manual_run"
 
 # COMMAND ----------
 

@@ -31,6 +31,7 @@ from pyspark.sql.types import DateType, DoubleType, IntegerType
 DATABASE    = "retail_platform"
 BRONZE_PATH = "dbfs:/retail_platform/bronze"
 SILVER_PATH = "dbfs:/retail_platform/silver"
+BATCH_ID    = dbutils.widgets.get("batch_id") if "batch_id" in [w.name for w in dbutils.widgets.getAll()] else "manual_run"
 
 spark.sql(f"USE {DATABASE}")
 
